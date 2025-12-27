@@ -7,6 +7,7 @@
 ## Overview
 This repository contains the accompanying simulation code for the paper "Collaborative Optimization Strategies for Matrix Multiplication-Accumulation Operators on Commercial Processing-In-Memory Architectures". It implements core optimization strategies including dynamic bank allocation, parity-bank interleaving mapping, and partitioned virtualization computing. This work is modified based on the original project https://github.com/SAITPublic/PIMSimulator.
 
+贺煜凯, 谢童欣, 朱振华, 高岚, 李冰. 面向商用存算一体架构矩阵乘算子协同优化策略研究[J]. 电子与信息学报, 2025, 47(9): 3187-3197. doi: 10.11999/JEIT250364
 
 ## Setup
 
