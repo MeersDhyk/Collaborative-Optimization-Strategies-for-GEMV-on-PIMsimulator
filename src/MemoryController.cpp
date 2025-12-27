@@ -57,7 +57,8 @@ MemoryController::MemoryController(MemorySystem* parent, CSVWriter& csvOut_, ost
       refreshRank(0),
       refreshBank(0),
       totalReads(0),
-      totalWrites(0)
+      totalWrites(0),
+      is_memory_access_active_(false)
 {
     // get handle on parent
     parentMemorySystem = parent;
@@ -371,6 +372,7 @@ void MemoryController::updateTransactionQueue()
             // PRINT( "== Warning - No room in command queue" << endl;
         }
         */
+        
     }
 }
 
@@ -459,6 +461,7 @@ void MemoryController::updateRefresh()
 void MemoryController::update()
 {
     updateBankState();
+    is_memory_access_active_ = false;
     // check for outgoing command packets and handle countdowns
     if (outgoingCmdPacket != NULL)
     {
@@ -579,6 +582,21 @@ void MemoryController::update()
     // decrement refresh counters
     for (size_t i = 0; i < config.NUM_RANKS; i++) refreshCountdown[i]--;
     for (size_t i = 0; i < config.NUM_BANKS; i++) refreshCountdownBank[i]--;
+
+    // 检查读队列和写队列是否有事务
+    for (unsigned rank = 0; rank < config.NUM_RANKS; ++rank)
+    {
+        if (!commandQueue.isEmpty(rank))
+        {
+            is_memory_access_active_ = true;
+            break;
+        }
+    }
+
+    //if (!writeDataToSend.empty())
+    //{
+     //   is_memory_access_active_ = true;
+    //}
 
     // print debug
     printDebugOnUpate();
@@ -716,11 +734,11 @@ void MemoryControllerStats::printStats(bool finalStats, unsigned myChannel,
             (*parentMemorySystem->ReportPower)(backgroundPower[r], burstPower[r], refreshPower[r],
                                                actprePower[r]);
 
-        PRINTC(PRINT_CHAN_STAT, " == Power Data for Rank        " << r);
-        PRINTC(PRINT_CHAN_STAT, "   Average Power (watts)     : " << averagePower[r]);
-        PRINTC(PRINT_CHAN_STAT, "     -Act/Pre    (watts)     : " << actprePower[r]);
-        PRINTC(PRINT_CHAN_STAT, "     -Burst      (watts)     : " << burstPower[r]);
-        PRINTC(PRINT_CHAN_STAT, "     -AluPIM     (watts)     : " << aluPIMPower[r]);
+        //PRINTC(PRINT_CHAN_STAT, " == Power Data for Rank        " << r);
+        //PRINTC(PRINT_CHAN_STAT, "   Average Power (watts)     : " << averagePower[r]);
+        //PRINTC(PRINT_CHAN_STAT, "     -Act/Pre    (watts)     : " << actprePower[r]);
+        //PRINTC(PRINT_CHAN_STAT, "     -Burst      (watts)     : " << burstPower[r]);
+        //PRINTC(PRINT_CHAN_STAT, "     -AluPIM     (watts)     : " << aluPIMPower[r]);
 
         if (VIS_FILE_OUTPUT)
         {

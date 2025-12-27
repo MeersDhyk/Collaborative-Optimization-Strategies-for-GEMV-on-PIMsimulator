@@ -104,7 +104,7 @@ class ActPIMKernel : public IPIMCmd
     }
 };
 
-class GemvPIMKernel : public IPIMCmd
+/*class GemvPIMKernel : public IPIMCmd
 {
   public:
     GemvPIMKernel(KernelType ktype) : IPIMCmd(ktype) {}
@@ -140,8 +140,8 @@ class GemvPIMKernel : public IPIMCmd
                 PIMCmd(PIMCmdType::JUMP, 7, 2), PIMCmd(PIMCmdType::NOP, 7),
                 PIMCmd(PIMCmdType::MUL, PIMOpdType::GRF_B, PIMOpdType::GRF_B, PIMOpdType::EVEN_BANK,
                        1),
-                // PIMCmd(PIMCmdType::JUMP, num_jump, 7), /*it used that tile is 2*/
-            };
+                // PIMCmd(PIMCmdType::JUMP, num_jump, 7), /*it used that tile is 2
+         };
             pim_cmds.assign(tmp_cmds.begin(), tmp_cmds.end());
         }
         else
@@ -155,7 +155,60 @@ class GemvPIMKernel : public IPIMCmd
         pim_cmds.push_back(PIMCmd(PIMCmdType::EXIT, 0));
         return pim_cmds;
     }
+};*/
+
+/***************************************************************************************************
+ * 5) GemvPIMKernel (GEMV, GEMVTREE) => 我们在此做指令流水优化
+ **************************************************************************************************/
+class GemvPIMKernel : public IPIMCmd
+{
+  public:
+    GemvPIMKernel(KernelType ktype) : IPIMCmd(ktype) {}
+    virtual vector<PIMCmd> generateKernel(int num_jump_to_be_taken,
+                                          int num_jump_to_be_taken_odd_bank,
+                                          int num_jump_to_be_taken_even_bank) override;
 };
+
+class BnPIMKernel : public IPIMCmd
+{
+  public:
+    BnPIMKernel(KernelType ktype) : IPIMCmd(ktype) {}
+    virtual vector<PIMCmd> generateKernel(int num_jump_to_be_taken,
+                                          int num_jump_to_be_taken_odd_bank = 0,
+                                          int num_jump_to_be_taken_even_bank = 0) override
+    {
+        vector<PIMCmd> pim_cmds;
+        
+        if (kernelType == KernelType::BN)
+        {
+            // BN 操作的 PIM 命令序列
+            // 步骤 1: 加载 scale (gamma / sqrt(var + eps)) 到 GRF_A 的 EVEN_BANK
+            pim_cmds.emplace_back(PIMCmd(PIMCmdType::FILL, PIMOpdType::GRF_A, PIMOpdType::EVEN_BANK));
+            
+            // 步骤 2: 加载 shift (beta - gamma * mean / sqrt(var + eps)) 到 GRF_B 的 ODD_BANK
+            pim_cmds.emplace_back(PIMCmd(PIMCmdType::FILL, PIMOpdType::GRF_B, PIMOpdType::ODD_BANK));
+            
+            // 步骤 3: 执行乘法操作：GRF_A = GRF_A * GRF_A (假设 GRF_A 已加载了 scale)
+            pim_cmds.emplace_back(PIMCmd(PIMCmdType::MUL, PIMOpdType::GRF_A, PIMOpdType::GRF_A, PIMOpdType::EVEN_BANK, 1));
+            
+            // 步骤 4: 执行加法操作：GRF_A = GRF_A + GRF_B (GRF_B 存储 shift)
+            pim_cmds.emplace_back(PIMCmd(PIMCmdType::ADD, PIMOpdType::GRF_A, PIMOpdType::GRF_A, PIMOpdType::ODD_BANK, 1));
+        }
+        else
+        {
+            throw invalid_argument("Not supported batch normalization operation");
+        }
+
+        if (num_jump_to_be_taken != 0)
+        {
+            pim_cmds.push_back(PIMCmd(PIMCmdType::JUMP, num_jump_to_be_taken, pim_cmds.size() + 1));
+        }
+        pim_cmds.push_back(PIMCmd(PIMCmdType::EXIT, 0));
+        
+        return pim_cmds;
+    }
+};
+
 
 class PIMCmdGen
 {

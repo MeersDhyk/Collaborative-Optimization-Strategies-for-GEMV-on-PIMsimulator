@@ -167,6 +167,7 @@ void PimSimulator::run()
     while (mem_->hasPendingTransactions())
     {
         cycle_++;
+        //mem_access_cycles_++; // 增加内存访问周期计数
         mem_->update();
     }
 }

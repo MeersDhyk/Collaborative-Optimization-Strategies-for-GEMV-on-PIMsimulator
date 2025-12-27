@@ -52,8 +52,13 @@ class Rank;
 class MemorySystem;
 class MemoryControllerStats;
 class MemoryController : public SimulatorObject
-{
+{ 
   public:
+
+    bool isMemoryAccessActive() const
+    {
+      return is_memory_access_active_;
+    }
     // functions
     MemoryController(MemorySystem* ms, CSVWriter& csvOut_, ostream& simLog, Configuration& config);
     virtual ~MemoryController();
@@ -71,8 +76,12 @@ class MemoryController : public SimulatorObject
 
     // fields
     vector<Transaction*> transactionQueue;
+    uint64_t totalTransactionsConverted;
 
   private:
+    bool is_memory_access_active_;
+    //bool is_computation_active_;
+    
     ostream& dramsimLog;
     vector<vector<BankState>> bankStates;
 

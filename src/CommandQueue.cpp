@@ -556,3 +556,32 @@ void CommandQueue::update()
     // needed for SimulatorObject
     // TODO: make CommandQueue not a SimulatorObject
 }
+
+
+unsigned CommandQueue::getNumReadyCommands()
+{
+    unsigned numReadyCommands = 0;
+
+    // 遍历所有队列，统计可发出的命令
+    for (unsigned rank = 0; rank < num_ranks_; ++rank)
+    {
+        for (unsigned bank = 0; bank < num_banks_; ++bank)
+        {
+            vector<BusPacket*>& queue = getCommandQueue(rank, bank);
+            for (size_t i = 0; i < queue.size(); ++i)
+            {
+                BusPacket* packet = queue[i];
+                if (isIssuable(packet))
+                {
+                    // 命令可发出
+                    numReadyCommands++;
+                    // 如果您只想统计每个队列中的第一个可发出的命令，可以添加 break；
+                    // 否则，统计所有可发出的命令
+                    break; // 如果只统计每个队列中的一个命令，可保留此行
+                }
+            }
+        }
+    }
+
+    return numReadyCommands;
+}

@@ -71,6 +71,8 @@ class CommandQueue : public SimulatorObject
     bool isIssuable(BusPacket* busPacket);
     bool isEmpty(unsigned rank);
     void needRefresh(unsigned rank);
+// 添加新函数
+    unsigned getNumReadyCommands();
 
     void print();
     void update();  // SimulatorObject requirement

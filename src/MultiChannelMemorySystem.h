@@ -105,6 +105,7 @@ class MultiChannelMemorySystem : public MemoryObject
         *val = getConfigParam(FLOAT, field);
     }
 
+
   private:
     unsigned findChannelNumber(uint64_t addr);
     void actual_update();

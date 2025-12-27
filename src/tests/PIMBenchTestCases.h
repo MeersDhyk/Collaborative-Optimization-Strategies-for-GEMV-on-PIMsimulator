@@ -15,6 +15,8 @@
 
 #include <memory>
 #include <string>
+#include <chrono>
+
 
 #include "tests/TestCases.h"
 
@@ -23,6 +25,17 @@ using namespace DRAMSim;
 class PIMBenchTestCase
 {
   public:
+
+    uint64_t getMemAccessCycles()
+    {
+        return kernel_->getMemAccessCycles();
+    }
+
+
+    /*uint64_t getComputationCycles()
+    {
+        return kernel_->getComputationCycles();
+    }*/
     PIMBenchTestCase(KernelType k, unsigned b, unsigned out, unsigned in)
         : kernel_type_(k), batch_(b), out_(out), in_(in)
     {
@@ -36,6 +49,21 @@ class PIMBenchTestCase
         kernel_ = make_shared<PIMKernel>(pim_mem_, 64, 1);
         dim_data_ = new DataDim(kernel_type_, batch_, out_, in_, false);
     }
+    //我改的代码
+    /*PIMBenchTestCase(KernelType k, unsigned m, unsigned n, unsigned k_dim, bool is_gemm)
+        : kernel_type_(k), m_(m), n_(n), k_(k_dim)
+    {
+        mem_ = make_shared<MultiChannelMemorySystem>("ini/HBM2_samsung_2M_16B_x64.ini",
+                                                     "system_hbm_64ch.ini", ".", "example_app",
+                                                     256 * 64 * 2);
+        pim_mem_ = make_shared<MultiChannelMemorySystem>("ini/HBM2_samsung_2M_16B_x64.ini",
+                                                         "system_hbm_64ch.ini", ".", "example_app",
+                                                         256 * 64 * 2);
+        // # of pim channel = 64, # of pim rank = 1
+        kernel_ = make_shared<PIMKernel>(pim_mem_, 64, 1);
+        // 对于 GEMM，初始化 DataDim 时需要传入 is_gemm = true
+        dim_data_ = new DataDim(kernel_type_, m_, n_, k_, false, is_gemm); // is_gemm = true
+    }*/
 
     virtual ~PIMBenchTestCase()
     {
@@ -87,6 +115,14 @@ class PIMBenchTestCase
         else if (k == KernelType::RELU)
         {
             return string{"RELU"};
+        }
+        /*else if (k == KernelType::GEMM)
+        {
+            return string{"GEMM"};
+        }*/
+        else if (k == KernelType::BN)
+        {
+            return string{"BN"};
         }
         else
         {
@@ -239,6 +275,86 @@ class ActPIMBenchTest : public PIMBenchTestCase
     unsigned result_row_;
 };
 
+class BnPIMBenchTest : public PIMBenchTestCase
+{
+  public:
+    BnPIMBenchTest(KernelType k, unsigned b, unsigned out, unsigned in)
+        : PIMBenchTestCase(k, b, out, in)
+    {
+        input_row0_ = 0;
+        result_row_ = 256;
+    }
+
+    uint64_t measureCycle(bool is_pim_)
+    {
+        uint64_t cycle = 0;
+        uint64_t starting_addr = 0;
+
+        if (is_pim_ == true)
+        {
+            // 在 PIM 模式下执行 BN 操作
+            /*kernel_->executeBn(&dim_data_->mean_npbst_, &dim_data_->var_npbst_,
+                               &dim_data_->gamma_npbst_, &dim_data_->beta_npbst_,
+                               &dim_data_->input_npbst_, &dim_data_->output_npbst_, 1e-5);*/
+            kernel_->executeEltwise(dim_data_->output_dim_, pimBankType::ALL_BANK,
+                                    KernelType::BN, input_row0_, result_row_, 0);
+            kernel_->runPIM();
+            cycle = kernel_->getCycle();
+        }
+        else
+        {
+            /*uint32_t input_data_size_in_bytes = dim_data_->getDataSize(dim_data_->input_dim_, dim_data_->batch_size_);
+            starting_addr = genMemTraffic(mem_, false, input_data_size_in_bytes, starting_addr);
+            run(mem_, &cycle);
+
+            // 2. 均值数据读取
+            uint32_t mean_data_size_in_bytes = dim_data_->getDataSize(dim_data_->output_dim_, 1);
+            starting_addr = genMemTraffic(mem_, false, mean_data_size_in_bytes, starting_addr);  // 模拟均值读取
+            run(mem_, &cycle);
+
+            // 3. 方差数据读取
+            uint32_t var_data_size_in_bytes = mean_data_size_in_bytes;
+            starting_addr = genMemTraffic(mem_, false, var_data_size_in_bytes, starting_addr);  // 模拟方差读取
+            run(mem_, &cycle);
+
+            // 4. gamma和beta读取
+            uint32_t gamma_data_size_in_bytes = mean_data_size_in_bytes;
+            uint32_t beta_data_size_in_bytes = gamma_data_size_in_bytes;
+            starting_addr = genMemTraffic(mem_, false, gamma_data_size_in_bytes, starting_addr);  // 模拟gamma读取
+            starting_addr = genMemTraffic(mem_, false, beta_data_size_in_bytes, starting_addr);   // 模拟beta读取
+            run(mem_, &cycle);
+
+            // 5. 执行 BN 计算并增加周期数
+            // 假设每个元素的 BN 计算需要固定的周期数
+            //uint32_t num_elements = dim_data_->batch_size_ * dim_data_->output_dim_;
+            //uint32_t bn_compute_cycles = 4 * 1024 * 1024 - 1 * 1024 * 1024;  
+            //cycle += bn_compute_cycles;  // 增加 BN 计算所需的周期数
+
+            // 6. 输出数据写入
+            uint32_t output_data_size_in_bytes = dim_data_->getDataSize(dim_data_->output_dim_, dim_data_->batch_size_);
+            starting_addr = genMemTraffic(mem_, true, output_data_size_in_bytes, starting_addr);  // 模拟输出写入
+            run(mem_, &cycle);*/
+            uint32_t input_data_size_in_byte =
+                dim_data_->getDataSize(dim_data_->input_dim_, dim_data_->batch_size_);
+            uint32_t input1_data_size_in_byte =
+                dim_data_->getDataSize(dim_data_->input_dim_, dim_data_->batch_size_);
+            uint32_t output_data_size_in_byte =
+                dim_data_->getDataSize(dim_data_->output_dim_, dim_data_->batch_size_);
+            starting_addr = genMemTraffic(mem_, false, input_data_size_in_byte, starting_addr);
+            starting_addr = genMemTraffic(mem_, false, input1_data_size_in_byte, starting_addr);
+            run(mem_, &cycle);
+            genMemTraffic(mem_, true, output_data_size_in_byte, starting_addr);  // result-vec
+            run(mem_, &cycle);
+        }
+            return cycle;
+    }
+
+  private:
+    // PIM 所需的参数行号
+    unsigned input_row0_;
+    unsigned result_row_;
+};
+
 class PIMBenchFixture : public testing::Test
 {
   public:
@@ -269,6 +385,10 @@ class PIMBenchFixture : public testing::Test
         else if (k == KernelType::RELU)
         {
             perfTest = new ActPIMBenchTest(k, batch, out, in);
+        }
+        else if (k == KernelType::BN)
+        {
+            perfTest = new BnPIMBenchTest(k, batch, out, in);
         }
         else
         {
@@ -305,7 +425,6 @@ class PIMBenchFixture : public testing::Test
     {
         cout << "> Test Results " << endl;
         cout << "> Cycle : " << cycle << endl;
-        cout << endl;
     }
 
     void printResult(float gain)

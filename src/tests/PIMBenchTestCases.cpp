@@ -23,7 +23,7 @@ using namespace DRAMSim;
 
 TEST_F(PIMBenchFixture, gemv)
 {
-    setPIMBenchTestCase(KernelType::GEMV, 4096, 4096);  // (KernelType, out_vec, in_vec)
+    setPIMBenchTestCase(KernelType::GEMV, 4096,4096);  // (KernelType, out_vec, in_vec)
     executeKernel();                                    // execute w/o PIM
     executePIMKernel();                                 // execute w/ PIM
     expectPIMBench(2.0);
@@ -31,15 +31,15 @@ TEST_F(PIMBenchFixture, gemv)
 
 TEST_F(PIMBenchFixture, mul)
 {
-    setPIMBenchTestCase(KernelType::MUL, 2 * 1024 * 1024, 2 * 1024 * 1024);
+    setPIMBenchTestCase(KernelType::MUL, 4 * 1024 * 1024, 4 * 1024 * 1024);
     executeKernel();
     executePIMKernel();
     expectPIMBench(2.0);
 }
 
 TEST_F(PIMBenchFixture, add)
-{
-    setPIMBenchTestCase(KernelType::ADD, 1024 * 1024, 1024 * 1024);
+{ 
+    setPIMBenchTestCase(KernelType::ADD, 4 * 1024 * 1024, 4 * 1024 * 1024);
     executeKernel();
     executePIMKernel();
     expectPIMBench(2.0);
@@ -47,8 +47,17 @@ TEST_F(PIMBenchFixture, add)
 
 TEST_F(PIMBenchFixture, relu)
 {
-    setPIMBenchTestCase(KernelType::RELU, 4 * 1024 * 1024, 4 * 1024 * 1024);
+    setPIMBenchTestCase(KernelType::RELU, 4*8192*8192, 4*8192*8192);
     executeKernel();
     executePIMKernel();
     expectPIMBench(2.0);
 }
+
+TEST_F(PIMBenchFixture, batch_norm)
+{
+    setPIMBenchTestCase(KernelType::BN,1 * 1024 * 1024 ,4 * 1024 * 1024);  // 输入维度为 (out_dim, input_dim)
+    executeKernel();       // 非 PIM 模式下执行 BN
+    executePIMKernel();    // PIM 模式下执行 BN
+    expectPIMBench(2.0);   // 期望 PIM 提速比（例如，设为 2.0）
+}
+

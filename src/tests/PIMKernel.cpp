@@ -11,12 +11,17 @@
  **************************************************************************************************/
 
 #include "tests/PIMKernel.h"
+#include "tests/PIMBenchTestCases.h"
 
 #include <iomanip>
 #include <string>
 
 #include "AddressMapping.h"
 #include "tests/PIMCmdGen.h"
+#include <cassert>
+
+//每个 Bank-Group 启用的活跃 bank 数；<0 表示不启用动态子集
+static int g_active_per_bg = -1;
 
 void PIMKernel::runPIM()
 {
@@ -24,6 +29,27 @@ void PIMKernel::runPIM()
     {
         cycle_++;
         mem_->update();
+
+        bool mem_access_active = false;
+
+        for (int ch_idx = 0; ch_idx < num_pim_chans_; ch_idx++)
+        {
+            MemoryController* mem_ctrl = mem_->channels[ch_idx]->memoryController;
+
+            if (mem_ctrl->isMemoryAccessActive())
+            {
+                mem_access_active = true;
+            }
+
+        }
+
+        if (mem_access_active)
+        {
+            mem_access_cycles_++;
+        }
+
+    
+
     }
 }
 
@@ -32,6 +58,7 @@ uint64_t PIMKernel::getCycle()
     return cycle_;
 }
 
+/*
 void PIMKernel::parkIn()
 {
     addBarrier();
@@ -84,6 +111,69 @@ void PIMKernel::parkOut()
     }
     addBarrier();
 }
+*/
+void PIMKernel::parkIn()
+{
+    addBarrier();
+    for (int& ch_idx : pim_chans_)
+    {
+        for (int& ra_idx : pim_ranks_)
+        {
+            // 仅遍历 active 子集；否则默认遍历每组全量 bank
+            int per_bg_full = (num_banks_ / num_bank_groups_);
+            int bank_limit  = (g_active_per_bg > 0) ? g_active_per_bg : per_bg_full;
+
+            for (int bank_idx = 0; bank_idx < bank_limit; bank_idx++)
+            {
+                for (int bg_idx = 0; bg_idx < num_bank_groups_; bg_idx++)
+                {
+                    std::string str = "PARK_IN_";
+                    if (bg_idx == 0 && bank_idx == 0)
+                        str = "START_" + str;
+                    else if (bg_idx == (num_bank_groups_ - 1) && bank_idx == (bank_limit - 1))
+                        str = "END_" + str;
+
+                    mem_->addTransaction(
+                        false,
+                        pim_addr_mgr_->addrGen(ch_idx, ra_idx, bg_idx, bank_idx, (1 << 13), 0), str,
+                        &null_bst_);
+                }
+            }
+        }
+    }
+    addBarrier();
+}
+
+void PIMKernel::parkOut()
+{
+    for (int& ch_idx : pim_chans_)
+    {
+        for (int& ra_idx : pim_ranks_)
+        {
+            // 仅遍历 active 子集；否则默认遍历每组全量 bank
+            int per_bg_full = (num_banks_ / num_bank_groups_);
+            int bank_limit  = (g_active_per_bg > 0) ? g_active_per_bg : per_bg_full;
+
+            for (int bank_idx = 0; bank_idx < bank_limit; bank_idx++)
+            {
+                for (int bg_idx = 0; bg_idx < num_bank_groups_; bg_idx++)
+                {
+                    std::string str = "PARK_OUT_";
+                    if (bg_idx == 0 && bank_idx == 0)
+                        str = "START_" + str;
+                    else if (bg_idx == (num_bank_groups_ - 1) && bank_idx == (bank_limit - 1))
+                        str = "END_" + str;
+
+                    mem_->addTransaction(
+                        false,
+                        pim_addr_mgr_->addrGen(ch_idx, ra_idx, bg_idx, bank_idx, (1 << 13), 0), str,
+                        &null_bst_);
+                }
+            }
+        }
+    }
+    addBarrier();
+}
 
 void PIMKernel::addTransactionAll(bool is_write, int bg_idx, int bank_idx, int row, int col,
                                   const string tag, BurstType* bst, bool use_barrier, int num_loop)
@@ -115,7 +205,9 @@ void PIMKernel::addTransactionAll(bool is_write, int bg_idx, int bank_idx, int r
 
 void PIMKernel::addBarrier()
 {
-    for (int& ch_idx : pim_chans_) mem_->addBarrier(ch_idx);
+    for (int& ch_idx : pim_chans_){
+         mem_->addBarrier(ch_idx);
+    }
 }
 
 void PIMKernel::changePIMMode(dramMode curMode, dramMode nextMode)
@@ -148,7 +240,6 @@ void PIMKernel::changePIMMode(dramMode curMode, dramMode nextMode)
     addBarrier();
 }
 
-/*
 void PIMKernel::preprocessBn(NumpyBurstType* mean_npbst, NumpyBurstType* var_npbst,
                              NumpyBurstType* gamma_npbst, NumpyBurstType* beta_npbst,
                              NumpyBurstType* input_npbst, fp16** params, float eps)
@@ -163,7 +254,6 @@ void PIMKernel::preprocessBn(NumpyBurstType* mean_npbst, NumpyBurstType* var_npb
     }
 }
 
-// FIXME : FIX size of srf_bst_. if ch_model is bigger than memory channel, it is not defined.
 void PIMKernel::preprocessSrf(NumpyBurstType* input_npbst, fp16** params, int burst_offset,
                               int num_srf_usage)
 {
@@ -214,7 +304,7 @@ void PIMKernel::programSrf()
    }
    addBarrier();
 }
-*/
+
 
 void PIMKernel::programCrf(vector<PIMCmd>& cmds)
 {
@@ -230,6 +320,7 @@ void PIMKernel::programCrf(vector<PIMCmd>& cmds)
             if (i * 8 + j >= cmds.size())
                 break;
             crf_bst_[i].u32Data_[j] = cmds[i * 8 + j].toInt();
+
         }
         addTransactionAll(true, 0, 1, pim_reg_ra, 0x4 + i, "PROGRAM_CRF", &(crf_bst_[i]));
     }
@@ -278,8 +369,8 @@ void PIMKernel::changeBank(pimBankType pb_type, int& ch_idx, int& ra_idx, int& b
         }
     }
 }
-
-void PIMKernel::preloadGemv(NumpyBurstType* operand, unsigned starting_row, unsigned starting_col)
+/*原PIMsimulator中proloadGEMV的实现方式*/
+/*void PIMKernel::preloadGemv(NumpyBurstType* operand, unsigned starting_row, unsigned starting_col)
 {
     int input_tile_size = num_grfA_;
     int output_tile_size = num_grfB_ * num_total_pim_blocks_;
@@ -295,6 +386,7 @@ void PIMKernel::preloadGemv(NumpyBurstType* operand, unsigned starting_row, unsi
     {
         for (int x = 0; x < operand->bShape[1]; x += input_tile_size)
         {
+
             bool is_odd = ((x / input_tile_size) % 2 == 1) ? true : false;
 
             for (int tiled_y = 0; tiled_y < output_tile_size; tiled_y += num_grfB_)
@@ -304,22 +396,95 @@ void PIMKernel::preloadGemv(NumpyBurstType* operand, unsigned starting_row, unsi
 
                 for (int grfb_idx = 0; grfb_idx < num_grfB_; grfb_idx++)
                 {
+
                     for (int grfa_idx = 0; grfa_idx < num_grfA_; grfa_idx++, col++)
                     {
                         addr = pim_addr_mgr_->addrGenSafe(ch_idx, ra_idx, bg_idx, bank_idx + is_odd,
                                                           row, col);
+                        std::cout << "is_odd: " << is_odd << ", bank_idx: " << bank_idx << ", accessing bank: " << bank_idx + is_odd << std::endl;
+
                         int d_idx = (y + tiled_y + grfb_idx) * operand->bShape[1] + x + grfa_idx;
                         mem_->addTransaction(true, addr, &operand->bData[d_idx]);
+                        //mem_access_cycles_++;
                     }
                 }
                 is_odd ? changeBank(pimBankType::ODD_BANK, ch_idx, ra_idx, bg_idx, bank_idx,
                                     odd_starting_row, odd_starting_col, row, col)
+                                    
                        : changeBank(pimBankType::EVEN_BANK, ch_idx, ra_idx, bg_idx, bank_idx,
                                     even_starting_row, even_starting_col, row, col);
             }
         }
     }
+
+}*/
+
+
+/**************************************************************************************************
+ * 改进后的preloadGemv:
+ *   动态bank, is_odd + bank_idx 交错,
+ **************************************************************************************************/
+void PIMKernel::preloadGemv(NumpyBurstType* operand, unsigned starting_row, unsigned starting_col)
+{
+    int M = (int)operand->bShape[0];
+    int K = (int)operand->bShape[1]; 
+
+    long size = (long)M * (long)K;
+    int bank_range;
+    if (K < 2048) {
+        bank_range = 4; // 小型任务（K<2048）：启用4个Bank
+    } else if (K < 4096) {
+        bank_range = 8; // 中型任务（2048≤K<4096）：启用8个Bank
+    } else {
+        bank_range = 16; // 大型任务（K≥4096）：启用16个Bank
+    }
+    if (bank_range > num_banks_) {
+        bank_range = num_banks_;
+    }
+    if (bank_range < 1) {
+        bank_range = 1;
+    }
+
+    int input_tile_size  = num_grfA_;
+    int output_tile_size = num_grfB_ * num_total_pim_blocks_;
+
+    int ch_idx = 0, ra_idx = 0, bg_idx = 0;
+    unsigned row = starting_row, col = starting_col;
+    int bank_idx = 0;
+
+    for (int y = 0; y < M; y += output_tile_size)
+    {
+        for (int x = 0; x < K; x += input_tile_size)
+        {
+            bool is_odd = (((x / input_tile_size) % 2) == 1);
+
+            for (int tiled_y = 0; tiled_y < output_tile_size; tiled_y += num_grfB_)
+            {
+                for (int grfb_idx = 0; grfb_idx < num_grfB_; grfb_idx++)
+                {
+                    for (int grfa_idx = 0; grfa_idx < num_grfA_; grfa_idx++, col++)
+                    {
+                        int d_idx = (y + tiled_y + grfb_idx)*K + (x + grfa_idx);
+                        if (d_idx >= (int)operand->bData.size()) break;
+
+                        int final_bank = (bank_idx + (is_odd ? 1 : 0)) % bank_range;
+
+                        uint64_t addr = pim_addr_mgr_->addrGenSafe(ch_idx, ra_idx, bg_idx,
+                                                                  final_bank, row, col);
+
+                        mem_->addTransaction(true, addr, &operand->bData[d_idx]);
+                    }
+                }
+                bank_idx = (bank_idx + 1) % bank_range;
+            }
+        }
+    }
+    addBarrier();
 }
+
+
+
+
 
 void PIMKernel::preloadNoReplacement(NumpyBurstType* operand, unsigned starting_row,
                                      unsigned starting_col)
@@ -332,41 +497,21 @@ void PIMKernel::preloadNoReplacement(NumpyBurstType* operand, unsigned starting_
         mem_->addTransaction(true, addr, &operand->bData[x]);
     }
 }
-/*
-void PIMKernel::preloadEltwise(NumpyBurstType* operand, pimBankType pb_type,
-                              unsigned starting_row, unsigned starting_col)
-{
-   int ch_idx = 0;
-   int ra_idx = 0;
-   int bg_idx = 0;
-   int bank_idx = 0;
-   int bank_offset =  (int)pb_type % 2;
-   uint64_t addr_op;
-   int dim_operand = operand->getTotalDim();
 
-   for (int x=0; x < dim_operand; x+=num_grf_)
-   {
-       unsigned col = starting_col;
-       unsigned row = starting_row;
-
-       for (int grf_idx = 0; grf_idx < num_grf_; grf_idx++)
-       {
-           addr_op = pim_addr_mgr_->addrGenSafe(ch_idx, ra_idx, bg_idx, bank_idx + bank_offset, row,
-                                                col);
-           mem_->addTransaction(true, addr_op, &operand->bData[x + grf_idx]);
-           col++;
-       }
-       changeBank(pb_type, ch_idx, ra_idx, bg_idx, bank_idx, starting_row, starting_col, row, col);
-   }
-}
-*/
+/**************************************************************************************************
+ * executeGemv:
+ *   只在最外层 parkIn->SB->HAB->HAB_PIM, 结束时 HAB_PIM->HAB->SB->parkOut
+ *   内部 computeGemv时, 通过 "虚拟grfA_" 分段模拟更大lane
+ **************************************************************************************************/
 void PIMKernel::executeGemv(NumpyBurstType* w_data, NumpyBurstType* i_data, bool is_tree)
 {
-    int num_output_tiles = ceil(((double)w_data->bShape[0] / (num_total_pim_blocks_)) / num_grfB_);
-    int num_input_tiles = ceil((double)w_data->bShape[1] / (double)num_grfA_);
-    int num_batch = i_data->bShape[0];
-    int zero_row = 1000;
+    int M = (int)w_data->bShape[0];
+    int K = (int)w_data->bShape[1];
 
+    // 调整tile, 同时设置virtual_grfA_/virtual_grfB_
+    adjustTileSize(K);
+
+    int zero_row = 1000;
     if (is_tree)
     {
         for (int ch = 0; ch < num_pim_chans_; ch++)
@@ -385,59 +530,146 @@ void PIMKernel::executeGemv(NumpyBurstType* w_data, NumpyBurstType* i_data, bool
         }
     }
 
-    vector<PIMCmd> pim_cmds;
-    if (is_tree)
-    {
-        int num_jump = ceil((double)num_input_tiles / 2) - 1;
-        pim_cmds = PIMCmdGen::getPIMCmds(KernelType::GEMVTREE, num_jump, 0, 0);
-    }
-    else
-    {
-        int num_jump_of_even_bank = num_grfB_ * ceil((double)num_input_tiles / 2) - 1;
-        int num_jump_of_odd_bank = num_grfB_ * floor(num_input_tiles / 2) - 1;
-        pim_cmds =
-            PIMCmdGen::getPIMCmds(KernelType::GEMV, 0, num_jump_of_odd_bank, num_jump_of_even_bank);
-    }
-    setControl(&bst_hab_pim_, true, getToggleCond(), false, true);
+    // 1) 进入 PIM
     parkIn();
     changePIMMode(dramMode::SB, dramMode::HAB);
+
+    // 2) 预加载
+    preloadGemv(w_data, 0, 0);
+
+    // 3) 构造 CRF
+    int num_input_tiles = (int)std::ceil( (double)K / (double)virtual_grfA_ );
+    int real_input_tiles = (int)std::ceil( (double)K / (double)num_grfA_ );
+    int num_jump_even = num_grfB_ * (int)std::ceil((double)real_input_tiles / 2.0) - 1;
+    int num_jump_odd  = num_grfB_ * (int)std::floor((double)real_input_tiles / 2.0) - 1;
+
+    vector<PIMCmd> pim_cmds =
+        PIMCmdGen::getPIMCmds(KernelType::GEMV, 0, num_jump_odd, num_jump_even);
+
+    setControl(&bst_hab_pim_, true, getToggleCond(), false, true);
     programCrf(pim_cmds);
+
+    changePIMMode(dramMode::HAB, dramMode::HAB_PIM);
+
+    // 4) 进行compute
+    int num_output_tiles = (int)std::ceil( (double)M / (num_total_pim_blocks_ * num_grfB_) );
+    int batch = i_data->bShape[0];
 
     for (int j = 0; j < num_output_tiles; j++)
     {
-        for (int b = 0; b < num_batch; b++)
+        for (int b = 0; b < batch; b++)
         {
-            changePIMMode(dramMode::HAB, dramMode::HAB_PIM);  // PC reset.
+            // offset for col
+            int col = num_output_tiles * real_input_tiles / 2 * num_grfA_ * num_grfB_
+                      + (j + b) * num_grfB_;
 
-            int col = num_output_tiles * num_input_tiles / 2 * num_grfA_ * num_grfB_ +
-                      (j + b) * num_grfB_;
             if (is_tree)
             {
                 for (int i = 0; i < num_input_tiles; i++, col += num_grfB_)
                 {
-                    computeGemv(i_data, num_input_tiles, num_output_tiles, i, j, b,
-                                (i % 2 == 0) ? pimBankType::EVEN_BANK : pimBankType::ODD_BANK);
-                    addTransactionAll(true, 0, 1, 0, col, "GRFB_TO_BANK_", &null_bst_, true,
-                                      num_grf_);
-                    addTransactionAll(false, 0, 0, zero_row, 0, "RESET_GRF_B", &null_bst_, true,
-                                      num_grfB_);
+                    computeGemvVirtual(i_data, num_input_tiles, num_output_tiles,
+                                       i, j, b,
+                                       (i % 2 == 0)? pimBankType::EVEN_BANK:pimBankType::ODD_BANK);
+
+                    addTransactionAll(true, 0, 1, 0, col, "GRFB_TO_BANK_", &null_bst_, true, num_grf_);
+
+                    // reset GRF_B if needed
                 }
             }
             else
             {
-                for (int i = 0; i < num_input_tiles; i += 2)
-                    computeGemv(i_data, num_input_tiles, num_output_tiles, i, j, b,
-                                pimBankType::EVEN_BANK);
-                for (int i = 1; i < num_input_tiles; i += 2)
-                    computeGemv(i_data, num_input_tiles, num_output_tiles, i, j, b,
-                                pimBankType::ODD_BANK);
+                // even
+                for(int i=0; i< num_input_tiles; i+=2)
+                {
+                    computeGemvVirtual(i_data, num_input_tiles, num_output_tiles,
+                                       i, j, b, pimBankType::EVEN_BANK);
+                }
+                // odd
+                for(int i=1; i< num_input_tiles; i+=2)
+                {
+                    computeGemvVirtual(i_data, num_input_tiles, num_output_tiles,
+                                       i, j, b, pimBankType::ODD_BANK);
+                }
                 addTransactionAll(true, 0, 1, 0, col, "GRFB_TO_BANK_", &null_bst_, true, num_grf_);
             }
-            changePIMMode(dramMode::HAB_PIM, dramMode::HAB);  // for grfBReset
         }
     }
+
+    // 5) 退出
+    changePIMMode(dramMode::HAB_PIM, dramMode::HAB);
     changePIMMode(dramMode::HAB, dramMode::SB);
     parkOut();
+}
+
+
+
+/**************************************************************************************************
+ * adjustTileSize():
+ *   物理: num_grfA_ / num_grfB_ = 8 (不改动硬件)
+ *   逻辑(虚拟): virtual_grfA_, virtual_grfB_ 
+ **************************************************************************************************/
+void PIMKernel::adjustTileSize(int input_dim)
+{
+    // 物理保留 8
+    num_grfA_ = 8;
+    num_grfB_ = 8;
+
+    // 默认让虚拟=16
+    virtual_grfA_ = 16;
+    virtual_grfB_ = 16;
+
+}
+/**************************************************************************************************
+ * computeGemvVirtual():
+ *   在这里用 "virtual_grfA_" 分段加载 => 物理 num_grfA_ 次
+ *   一次call 表示1个 inputTile, 但虚拟size= virtual_grfA_
+ **************************************************************************************************/
+void PIMKernel::computeGemvVirtual(NumpyBurstType* data,
+                                   int num_input_tiles,
+                                   int num_output_tiles,
+                                   int inputTile, int outputTile, int batchIdx,
+                                   pimBankType pb_type)
+{
+    // host视角: inputTile × virtual_grfA_ 大小
+    int vA = virtual_grfA_;   // 虚拟
+    int pA = num_grfA_;       // 物理
+    int remain = vA;
+    int offset = 0;
+
+    while (remain > 0)
+    {
+        int cur_load = (remain >= pA)? pA : remain; // 如果remain>8, 一次写8
+        // === 1) upload cur_load to GRF_A [0..cur_load-1] ===
+        for (int ch_idx = 0; ch_idx < num_pim_chans_; ch_idx++)
+        {
+            for (int ra_idx = 0; ra_idx < num_pim_ranks_; ra_idx++)
+            {
+                for (int gidx = 0; gidx < cur_load; gidx++)
+                {
+                    uint64_t addr = pim_addr_mgr_->addrGen(
+                        ch_idx, ra_idx, 0, 1, pim_reg_ra, 0x8 + gidx
+                    );
+                    int input_idx = batchIdx * (vA * num_input_tiles)
+                                  + (inputTile * vA)
+                                  + (offset + gidx);
+
+                    mem_->addTransaction(true, addr, &data->bData[input_idx]);
+                }
+            }
+        }
+        addBarrier();
+
+        // === 2) do partial MAC => col base + offset?
+        unsigned row = 0;
+        unsigned col = (num_grfA_ * num_grfB_)
+                       * ((inputTile/2) + (outputTile * (num_input_tiles/2)));
+
+        addTransactionAll(false, 0, (int)pb_type, row, col,
+                          "MAC_", &null_bst_, true, cur_load);
+
+        remain -= cur_load;
+        offset += cur_load;
+    }
 }
 
 void PIMKernel::computeGemv(NumpyBurstType* data, int num_input_tiles, int num_output_tiles,
@@ -447,9 +679,11 @@ void PIMKernel::computeGemv(NumpyBurstType* data, int num_input_tiles, int num_o
     {
         for (int ra_idx = 0; ra_idx < num_pim_ranks_; ra_idx++)
         {
+
             // input upload to GRF
             for (int gidx = 0; gidx < num_grfA_; gidx++)
             {
+
                 string str = "WRIO_TO_GRF_";
                 uint64_t addr =
                     pim_addr_mgr_->addrGen(ch_idx, ra_idx, 0, 1, pim_reg_ra, 0x8 + gidx);
@@ -459,15 +693,20 @@ void PIMKernel::computeGemv(NumpyBurstType* data, int num_input_tiles, int num_o
             }
             mem_->addBarrier(ch_idx);
         }
+
     }
 
     unsigned row = 0;
     unsigned col = (num_grfA_ * num_grfB_) * (inputTile / 2 + outputTile * num_input_tiles / 2);
 
     for (int c_idx = 0; c_idx < 64; c_idx += 8)
+    {
         addTransactionAll(false, 0, (int)pb_type, row, col + c_idx, "MAC_", &null_bst_, true,
                           num_grfA_);
+    }
 }
+
+
 
 void PIMKernel::readResult(BurstType* resultBst, pimBankType pb_type, int output_dim,
                            uint64_t base_addr, unsigned starting_row, unsigned starting_col)
@@ -476,7 +715,7 @@ void PIMKernel::readResult(BurstType* resultBst, pimBankType pb_type, int output
     int ra_idx = 0;
     int bg_idx = 0;
     int bank_idx = 0;
-    int bank_offset = (int)pb_type % 2;
+    int bank_offset = (int)pb_type % 2 ;
     uint64_t addr;
 
     for (int x = 0; x < output_dim; x += num_grf_)
@@ -498,12 +737,28 @@ void PIMKernel::readResult(BurstType* resultBst, pimBankType pb_type, int output
 void PIMKernel::executeEltwise(int dim, pimBankType pb_type, KernelType ktype, int input0_row,
                                int result_row, int input1_row)
 {
+    printf("aaaaa");
     int num_tile = dim / (num_banks_ * num_pim_chans_ * num_pim_ranks_ * num_grf_);
     int num_jump_to_be_taken = num_tile - 1;
     vector<PIMCmd> pim_cmds = PIMCmdGen::getPIMCmds(ktype, num_jump_to_be_taken, 0, 0);
 
     setControl(&bst_hab_pim_, true, getToggleCond(pb_type), false, false);
     setControl(&bst_hab_, false, getToggleCond(pb_type), false, false);
+
+     /* BN 特有的预处理步骤
+    if (ktype == KernelType::BN) {
+        // 1. 预处理 BN 参数
+        // 假设 params_ 已在类中定义为 fp16** params_;
+        //preprocessBn(mean_npbst_, var_npbst_, gamma_npbst_, beta_npbst_, input_npbst_, params_, 1e-5f);
+
+        // 2. 预处理 SRF
+        int burst_offset = 0;
+        int num_srf_usage = 1; // 根据需求调整
+        preprocessSrf(input_npbst_, params_, burst_offset, num_srf_usage);
+
+        // 3. 编程 SRF
+        programSrf();
+    }*/
 
     parkIn();
     changePIMMode(dramMode::SB, dramMode::HAB);
@@ -514,10 +769,8 @@ void PIMKernel::executeEltwise(int dim, pimBankType pb_type, KernelType ktype, i
         computeAddOrMul(num_tile, input0_row, result_row, input1_row);
     else if (ktype == KernelType::RELU)
         computeRelu(num_tile, input0_row, result_row);
-    /*
-       else if (ktype == KernelType::BN)
-       computeBn(num_tile, input0_row, result_row);
-     */
+    else if (ktype == KernelType::BN)
+        computeBn(num_tile, input0_row, result_row);
 
     changePIMMode(dramMode::HAB_PIM, dramMode::HAB);
     changePIMMode(dramMode::HAB, dramMode::SB);
@@ -539,7 +792,7 @@ void PIMKernel::computeAddOrMul(int num_tile, int input0_row, int result_row, in
     }
 }
 
-/*
+
 void PIMKernel::computeBn(int num_tile, int input0_row, int result_row)
 {
     for (int ch_idx = 0; ch_idx < num_pim_chans_; ch_idx++)
@@ -568,17 +821,20 @@ void PIMKernel::computeBn(int num_tile, int input0_row, int result_row)
         }
     }
 }
-*/
+
 
 void PIMKernel::computeRelu(int num_tile, int input0_row, int result_row)
 {
     for (int i = 0; i < num_tile; i++)
     {
         int c = num_grf_ * i;
+
         addTransactionAll(false, 0, 0, input0_row, c, "FILL&ReLU", &null_bst_, true, num_grf_);
+
         addTransactionAll(true, 0, 0, result_row, c, "GRF_A_TO_EVEN_BANK", &null_bst_, true,
                           num_grf_);
         addTransactionAll(false, 0, 1, input0_row, c, "FILL&ReLU", &null_bst_, true, num_grf_);
+ 
         addTransactionAll(true, 0, 1, result_row, c, "GRF_B_TO_ODD_BANK", &null_bst_, true,
                           num_grf_);
     }
@@ -620,4 +876,9 @@ void PIMKernel::adderTree(BurstType* result, int output_dim, int num_tile, int s
     adderTree(result, output_dim, ceil(double(num_tile) / (double)2), step + 1, temp);
 
     return;
+}
+
+uint64_t PIMKernel::getMemAccessCycles()
+{
+    return mem_access_cycles_;
 }
