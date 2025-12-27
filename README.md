@@ -1,8 +1,12 @@
 # Collaborative-Optimization-Strategies-for-GEMV-on-PIMsimulator
 
 ## Contents
-
+  [overview](#-overview)  
   [Setup](#-setup)  
+
+## Overview
+This repository contains the accompanying simulation code for the paper "Collaborative Optimization Strategies for Matrix Multiplication-Accumulation Operators on Commercial Processing-In-Memory Architectures". It implements core optimization strategies including dynamic bank allocation, parity-bank interleaving mapping, and partitioned virtualization computing. This work is modified based on the original project https://github.com/SAITPublic/PIMSimulator.
+
 
 ## Setup
 
